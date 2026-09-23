@@ -16,13 +16,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23a";
+export const 버전 = "2026-09-23b";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 const 프로젝트 = path.resolve(여기, "..");
 
-const 글모델 = "gpt-5.2";
-const 그림모델 = "gpt-image-2";
+// 2026-09-23 진현님: 글 1개 50원 이하 (승인글처럼). 예전 gpt-5.2 + gpt-image-2 보통 화질은 약 390원이었고 그중 사진 3장이 85%.
+// 그래서 승인글과 같은 조합으로 바꿨다: 글 gpt-5.4-mini, 사진 gpt-image-1-mini 저화질.
+const 글모델 = "gpt-5.4-mini";
+const 그림모델 = "gpt-image-1-mini";
+const 그림화질 = "low";
 
 async function 오픈AI(키, 경로, body) {
   const r = await fetch("https://api.openai.com/v1" + 경로, {
@@ -113,7 +116,8 @@ ${뼈대설명}
 ${후킹규칙}
 
 블록 규칙
-- 문단: 2~4줄. 줄 사이 빈 줄("") 을 넣어 호흡을 준다.
+- 문단: 3~4줄, 한 줄은 40~60자. 줄 사이 빈 줄("") 을 넣어 호흡을 준다.
+- 분량이 가장 자주 모자란다. 각 소제목 아래에는 문단 블록을 반드시 2개 이상 둔다 (대상·조건·방법·주의·예시를 구체적으로). 첫 후킹 문단 뒤에도 도입 문단을 1개 더 둔다.
 - 단락(섹션) 제목은 반드시 '소제목' 블록으로 넣는다 (검색 노출에 소제목이 유리하다). 벤치마크의 '섹션순서_인용구제목' 은 제목의 순서·내용만 참고하고, 블록 종류는 소제목으로 바꾼다. 소제목은 5~7개, 각 15자 안팎, 키워드가 자연스럽게 들어가게.
 - '인용구' 블록은 강조용이다. 글 전체에서 2~3개만, 본문 중간에서 독자가 꼭 기억해야 할 한 문장(핵심 결론·주의·행동)을 넣는다. 소제목 자리에 인용구를 쓰지 않는다.
 - 표는 정확히 9칸(3열×3행): 첫 줄은 열 이름, 그 다음 두 줄은 대표 사례 2개.
@@ -121,19 +125,40 @@ ${후킹규칙}
   사물·장소·상황·분위기만 쓴다. 간판·문서·서류·화면·책·표지판·현수막·포스터처럼 글자가 들어갈 만한 것은 넣지 않는다. 한국어 단어·제도 이름·숫자는 쓰지 않는다.
   사람을 그릴 때는 "seen from behind or in profile, face not visible" 를 넣는다. 화풍·글자 금지 규칙은 프로그램이 붙이므로 쓰지 않는다.
 - 구분선은 마지막 문단 앞에 한 번.
-- 전체 문단 글자 수는 1,800~2,600자.`;
+- 전체 문단 글자 수(띄어쓰기 빼고)는 1,800~2,600자. 1,800자보다 짧으면 실패다.`;
 
   const 입력 = 벤치마크 ? `벤치마크 구조:\n${JSON.stringify(벤치마크, null, 1)}` : `주제 키워드: ${키워드}`;
   const j = await 오픈AI(키, "/responses", {
     model: 글모델,
     input: [{ role: "developer", content: 지시 }, { role: "user", content: 입력 }],
     text: { format: { type: "json_schema", name: "naver_post", schema: 원고형식, strict: true } },
-    reasoning: { effort: "medium" },
+    reasoning: { effort: "low" },
   });
-  const 본문 = (j.output || []).flatMap((o) => o.content || []).find((c) => c.type === "output_text");
-  if (!본문) throw new Error("글 모델이 본문을 안 돌려줌: " + JSON.stringify(j).slice(0, 300));
-  const 원고 = JSON.parse(본문.text);
-  Object.defineProperty(원고, "_사용량", { value: { model: 글모델, input_tokens: j.usage?.input_tokens || 0, output_tokens: j.usage?.output_tokens || 0 }, enumerable: false });
+  const 꺼내기 = (응답) => {
+    const 본문 = (응답.output || []).flatMap((o) => o.content || []).find((c) => c.type === "output_text");
+    if (!본문) throw new Error("글 모델이 본문을 안 돌려줌: " + JSON.stringify(응답).slice(0, 300));
+    return JSON.parse(본문.text);
+  };
+  const 쓴돈 = [{ model: 글모델, input_tokens: j.usage?.input_tokens || 0, output_tokens: j.usage?.output_tokens || 0 }];
+  let 원고 = 꺼내기(j);
+  // 분량 보충 — 싼 모델은 글을 짧게 쓰는 버릇이 있다 (2026-09-23 실측 704자). 모자라면 한 번 늘려 쓰게 한다. 수강생에게는 알리지 않는다.
+  const 글자수 = (w) => (w.블록 || []).filter((b) => b.종류 === "문단").flatMap((b) => b.글 || []).join("").replace(/\s/g, "").length;
+  if (글자수(원고) < 1800) {
+    const j2 = await 오픈AI(키, "/responses", {
+      model: 글모델,
+      input: [
+        { role: "developer", content: 지시 },
+        { role: "user", content: 입력 },
+        { role: "assistant", content: JSON.stringify(원고) },
+        { role: "user", content: `문단 글자 수가 ${글자수(원고)}자라 너무 짧다. 제목·소제목·표·인용구·사진·구분선의 순서와 내용은 그대로 두고, 각 소제목 아래 문단을 늘리거나 문단 블록을 더해 전체 문단 글자 수(띄어쓰기 빼고)를 2,000자 안팎으로 맞춘 전체 원고를 같은 JSON 형식으로 다시 줘라. 새 문장은 구체적인 정보(대상·조건·방법·주의)로 채운다.` },
+      ],
+      text: { format: { type: "json_schema", name: "naver_post", schema: 원고형식, strict: true } },
+      reasoning: { effort: "low" },
+    });
+    쓴돈.push({ model: 글모델, input_tokens: j2.usage?.input_tokens || 0, output_tokens: j2.usage?.output_tokens || 0 });
+    try { const 늘린 = 꺼내기(j2); if (글자수(늘린) > 글자수(원고)) 원고 = 늘린; } catch {}
+  }
+  Object.defineProperty(원고, "_사용량", { value: 쓴돈, enumerable: false });
   return 원고;
 }
 
@@ -158,7 +183,7 @@ export async function 그림그리기({ 키, 프롬프트, 저장경로 }) {
     model: 그림모델,
     prompt: 최종그림프롬프트(프롬프트),
     size: "1024x1024",
-    quality: "medium",
+    quality: 그림화질,
     n: 1,
   });
   const b64 = j.data && j.data[0] && j.data[0].b64_json;
@@ -193,7 +218,7 @@ export async function 만들기({ 키, 벤치마크, 벤치마크URL, 키워드,
   await mkdir(폴더, { recursive: true });
 
   let n = 0;
-  const 사용량 = [원고._사용량].filter(Boolean);
+  const 사용량 = [...(원고._사용량 || [])];
   const 사진블록 = 원고.블록.filter((b) => b.종류 === "사진");
   // 그림은 동시에 만든다 (장당 30초~1분). 파일명에 키워드가 들어간다.
   await Promise.all(사진블록.map(async (b) => {

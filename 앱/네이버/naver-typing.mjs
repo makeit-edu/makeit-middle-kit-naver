@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23b";
+export const 버전 = "2026-09-23c";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -176,10 +176,22 @@ export async function 실행(옵션 = {}) {
     if (!ax || typeof ax.typeText !== "function" || typeof ax.click !== "function") { 적기("입력", { 실패: "이 브라우저 연결에는 ax 입력 API 가 없습니다" }); return 마무리(); }
     // 코덱스 크롬 확장 26.915(2026-09-18) 부터 typeText·pressKey 가 (대상요소번호, 값) 두 인자가 됐다. null 이면 지금 커서가 있는 칸에 넣는다.
     // 옛 판은 (값) 하나. 글자만 넘기면 새 판은 그 글자를 '요소 이름' 으로 읽어 "Could not prepare accessibility element 추석지원" 이 난다 (2026-09-23 실측).
-    const 새입력 = ax.typeText.length >= 2;
-    const 글넣기 = (글) => (새입력 ? ax.typeText(null, 글) : ax.typeText(글));
-    const 키넣기 = (키) => (새입력 ? ax.pressKey(null, 키) : ax.pressKey(키));
-    적기("입력방식", { 확장판: 새입력 ? "새 판 (요소번호, 값)" : "옛 판 (값)" });
+    // 함수 인자 개수로 판을 가리지 않는다 (감싼 함수는 length 가 0 이라 틀린다). 새 방식으로 먼저 넣어 보고, 모양이 안 맞다는 오류면 옛 방식으로.
+    // 한 번 맞는 방식을 찾으면 그 뒤로는 그 방식만 쓴다. 확장이 또 바뀌어도 둘 중 하나로 돈다.
+    let 입력방식 = null; // "새" | "옛"
+    const 모양오류 = (e) => /Could not prepare accessibility element|is stale or missing|element_index|Expected (number|string)|invalid_type|Invalid (input|arguments)|must be a|received (null|undefined)/i.test(String(e?.message || e));
+    const 두방식 = async (새로, 옛로) => {
+      if (입력방식 === "새") return 새로();
+      if (입력방식 === "옛") return 옛로();
+      try { await 새로(); 입력방식 = "새"; }
+      catch (e) {
+        if (!모양오류(e)) throw e;
+        await 옛로(); 입력방식 = "옛";
+      }
+      적기("입력방식", { 확장판: 입력방식 === "새" ? "새 판 (요소번호, 값)" : "옛 판 (값)" });
+    };
+    const 글넣기 = (글) => 두방식(() => ax.typeText(null, 글), () => ax.typeText(글));
+    const 키넣기 = (키) => 두방식(() => ax.pressKey(null, 키), () => ax.pressKey(키));
     const F = pw.frameLocator(R.프레임);
     const 키이름 = (k) => (k === "Enter" ? "Return" : k);
 

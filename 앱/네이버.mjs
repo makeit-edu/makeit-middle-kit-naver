@@ -21,7 +21,7 @@ import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {처방 as 승인글처방} from "./승인글.mjs";
 
-export const 버전 = "2026-09-23b";
+export const 버전 = "2026-09-23c";
 
 const 여기 = dirname(fileURLToPath(import.meta.url));
 const 프로그램폴더 = join(여기, "네이버");
@@ -32,7 +32,10 @@ const 설정파일 = (작업폴더) => join(작업폴더, "애드센스 승인�
 const 원장파일 = (작업폴더) => join(작업폴더, "애드센스 승인글", "02_생성결과_확인용", "사용량.json");
 
 // 100만 토큰당 달러. 글 모델·그림 모델 공식 단가가 바뀌면 여기만 고친다 (그림은 토큰 기준 추정값).
-const 단가 = {"gpt-5.2": {input: 1.75, output: 14}, "gpt-image-2": {input: 5, output: 40}};
+// OpenAI 공식 가격표(2026-09-23 확인). 사진도 토큰으로 센다 (사진 모델은 입력=글 프롬프트, 출력=그림 토큰).
+const 단가 = {"gpt-5.4-mini": {input: 0.75, output: 4.5}, "gpt-5.4": {input: 2.5, output: 15}, "gpt-5.2": {input: 1.75, output: 14},
+  "gpt-image-1-mini": {input: 2, output: 8}, "gpt-image-2": {input: 5, output: 30}, "gpt-image-1": {input: 5, output: 40}};
+const 사진한장 = {};
 const 원달러 = 1543.57527;
 
 async function 불러(이름) {
@@ -78,6 +81,7 @@ const 처방또는프로그램 = (문구) => ({...(처방(문구) || 프로그�
 
 // ───────── 사용량 장부 (승인글과 같은 파일, 같은 모양) ─────────
 function 비용({model, input_tokens = 0, output_tokens = 0}) {
+  if (사진한장[model] != null) return 사진한장[model];
   const 값 = 단가[Object.keys(단가).find((k) => String(model).includes(k))] || 단가["gpt-5.2"];
   return (input_tokens / 1e6) * 값.input + (output_tokens / 1e6) * 값.output;
 }
