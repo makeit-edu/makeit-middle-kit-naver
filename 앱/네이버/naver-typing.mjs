@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23e";
+export const 버전 = "2026-09-23f";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -141,7 +141,12 @@ export async function 실행(옵션 = {}) {
     let 이어쓰기 = false;
     const 시작블록 = Number(옵션.시작블록 || 0);
     if (시작블록 > 0) {
+      // 첫 호출에서 쓰던 탭을 기억해 두었다가 그대로 쓴다 (2026-09-23 실측: 이어 쓸 때 탭 목록에서 글쓰기 탭을 못 찾아 멈춤).
       try {
+        const 전탭 = globalThis.__메킷네이버탭;
+        if (전탭 && /blog\.naver\.com/.test(String(await Promise.resolve(전탭.url())))) tab = 전탭;
+      } catch {}
+      if (!tab) try {
         const 내탭들 = await chrome.tabs.list();
         for (const t of 내탭들) {
           const u = String(await Promise.resolve(t.url()).catch(() => ""));
@@ -155,7 +160,7 @@ export async function 실행(옵션 = {}) {
     }
     // 이어쓰기가 아니면 수강생이 열어 둔 헌 글쓰기 탭은 잡지 않고 항상 새 탭을 연다.
     // 2026-09-23 실측: 앞선 실패로 남은 글쓰기 탭을 잡았더니 편집기를 못 읽었다 (새 탭은 3초 만에 편집기가 잡힘).
-    const 탭들 = tab || !옵션.열린탭쓰기 ? [] : await chrome.user.openTabs();
+    const 탭들 = tab || (!옵션.열린탭쓰기 && !이어쓰기) ? [] : await chrome.user.openTabs();
     const 대상 = 탭들.find((t) => R.글쓰기주소패턴.some((p) => new RegExp(p).test(t.url || "")));
     if (대상) {
       try { tab = await chrome.user.claimTab(대상); 적기("탭잡기", { 방법: "열린 탭 잡음", 주소: (대상.url || "").slice(0, 80) }); }
@@ -173,6 +178,7 @@ export async function 실행(옵션 = {}) {
     // Codex 는 에이전트가 연 탭을 턴이 끝나면 자동으로 닫는다. 이어쓰기 도중 탭이 사라져 "Tab not found" 가 났다 (2026-09-17 실측).
     // '다음 턴에도 쓸 탭' 으로 표시해 두면 남는다.
     try { if (typeof tab.markHandoff === "function") await tab.markHandoff(); } catch {}
+    globalThis.__메킷네이버탭 = tab;
     const pw = tab.playwright;
     const ax = tab.ax;
     if (!ax || typeof ax.typeText !== "function" || typeof ax.click !== "function") { 적기("입력", { 실패: "이 브라우저 연결에는 ax 입력 API 가 없습니다" }); return 마무리(); }
@@ -285,6 +291,23 @@ export async function 실행(옵션 = {}) {
       }
       return "팝업 있는데 버튼 못 찾음";
     };
+    // 글감 검색 창 — 열리면 "글감을 검색해 보세요" 입력칸이 커서를 가져가 그 뒤 글자가 전부 거기로 들어간다 (2026-09-23 실측).
+    const 글감상태 = () => F.locator("body").first().evaluate((el) => {
+      const d = el.ownerDocument, i = d.querySelector(".se-flayer-unified-search-input"), a = d.activeElement;
+      const 보임 = !!(i && i.getClientRects().length && i.getBoundingClientRect().height > 0);
+      return { 열림: 보임 || a === i, 커서: a ? a.tagName + "." + String(a.className).slice(0, 40) : "" };
+    }).catch(() => ({ 열림: false }));
+    const 글감닫기 = async (이름, 때) => {
+      const 전 = await 글감상태();
+      if (!전.열림) return false;
+      적기("글감창", { 경고: `${이름} ${때} 글감 검색 창이 열려 있어 닫았습니다`, 커서: 전.커서 });
+      await 키("Escape"); await 쉬기(500);
+      if ((await 글감상태()).열림) { try { await 버튼클릭([".se-search-toolbar-button"], "글감"); } catch {} await 쉬기(700); }
+      const 마지막 = F.locator(".se-component.se-text .se-text-paragraph, .se-component.se-sectionTitle .se-text-paragraph").last();
+      if ((await 마지막.count().catch(() => 0)) > 0) { try { await 좌표클릭(마지막); await 키("End"); } catch {} }
+      await 쉬기(300);
+      return true;
+    };
     const 본문추가하기 = async () => {
       const b = await 찾기(R.본문추가버튼);
       if (!b) return "버튼 없음";
@@ -342,6 +365,7 @@ export async function 실행(옵션 = {}) {
       if (i < 시작블록) continue;
       if (시간초과()) { 이어서 = { 원고: 옵션.원고 || "원고1.json", 시작블록: i }; break; }
       const 이름 = `블록${i + 1}·${블록.종류}`;
+      await 글감닫기(이름, "쓰기 전에");
       try {
         if (블록.종류 === "문단") {
           for (const 줄 of 블록.글) { if (줄) await 타이핑(줄); await 키("Enter"); await 쉬기(랜덤(150)); }
@@ -445,6 +469,7 @@ export async function 실행(옵션 = {}) {
         } else {
           적기(이름, { 건너뜀: `모르는 종류: ${블록.종류}` });
         }
+        await 글감닫기(이름, "쓴 직후");
       } catch (e) {
         // 블록 하나가 안 되면 그 블록만 건너뛰고 글은 끝까지 쓴다. 열린 메뉴·선택 상태는 Escape 로 정리한다.
         적기(이름, { 건너뜀: String(e?.message || e).slice(0, 300) });

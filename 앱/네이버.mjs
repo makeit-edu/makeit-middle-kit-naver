@@ -217,7 +217,7 @@ async function 쓰기본체({agent, 작업폴더, 원고, 시작블록 = 0} = {}
   if (String(r.결과).startsWith("끝까지 됨")) {
     const 사진빠짐 = 기록.some((x) => x.사진건너뜀);
     const 빠진블록 = 기록.filter((x) => x.건너뜀).map((x) => x.단계);
-    const 빠진이유 = 기록.filter((x) => x.건너뜀 || x.사진건너뜀).map((x) => `${x.단계}: ${String(x.건너뜀 || x.사진건너뜀).slice(0, 200)}`);
+    const 빠진이유 = 기록.filter((x) => x.건너뜀 || x.사진건너뜀 || x.경고).map((x) => `${x.단계}: ${String(x.건너뜀 || x.사진건너뜀 || x.경고).slice(0, 200)}`);
     try { await writeFile(join(dirname(원고), "결과.json"), JSON.stringify({임시저장: true, 때: new Date().toISOString(), 사진빠짐, 빠진블록}, null, 2), "utf8"); } catch {}
     return {결과: "됨", 걸린시간초: r.걸린시간초, 사진빠짐, 빠진블록, 진단: 빠진이유};
   }
