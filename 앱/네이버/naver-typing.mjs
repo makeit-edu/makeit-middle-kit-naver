@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23k";
+export const 버전 = "2026-09-23l";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -351,6 +351,27 @@ export async function 실행(옵션 = {}) {
     const 들어간곳 = (앞) => F.locator("body").first().evaluate((el, 앞) => [...el.ownerDocument.querySelectorAll(".se-component")]
       .filter((c) => (c.innerText || "").replace(/\s+/g, "").includes(앞))
       .map((c) => (String(c.className).match(/se-(text|table|quotation|sectionTitle)\b/) || [])[1] || "?"), 앞).catch(() => []);
+    // 지금 커서 줄의 서식 — 도구 모음 "문단 서식" 버튼에 "본문"/"소제목" 이 표시된다.
+    // 2026-09-23 실측: 소제목 뒤 Enter 한 줄이 소제목 서식으로 남아 다음 문단이 소제목 안으로 들어갔다. 문단 쓰기 전에 본문으로 돌린다.
+    const 현재서식 = async () => {
+      const b = await 찾기(R.문단서식버튼);
+      if (!b) return "";
+      return b.loc.evaluate((el) => (el.innerText || "").trim().split("\n")[0].trim()).catch(() => "");
+    };
+    const 본문서식으로 = async () => {
+      const 전 = await 현재서식();
+      if (!전 || 전 === "본문") return 전 || "모름";
+      await 버튼클릭(R.문단서식버튼, "문단 서식"); await 쉬기(700);
+      const 자리 = await F.locator("body").first().evaluate((el) => {
+        const 후보 = [...el.ownerDocument.querySelectorAll("button, li")].filter((e) => (e.innerText || "").trim() === "본문" && e.getBoundingClientRect().height > 0);
+        const b = 후보[0]; if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }).catch(() => null);
+      if (자리) { const f = await 프레임위치(); await ax.click([Math.round(f.x + 자리.x), Math.round(f.y + 자리.y)]); await 쉬기(500); }
+      else { await 키("Escape"); await 쉬기(300); }
+      const 후 = await 현재서식();
+      적기("서식", { 바꿈: `${전} → ${후}` });
+      return 후;
+    };
     const 본문추가하기 = async () => {
       const b = await 찾기(R.본문추가버튼);
       if (!b) return "버튼 없음";
@@ -429,6 +450,7 @@ export async function 실행(옵션 = {}) {
       await 글감닫기(이름, "쓰기 전에");
       try {
         if (블록.종류 === "문단") {
+          await 본문서식으로();
           for (const 줄 of 블록.글) { if (줄) await 타이핑(줄); await 키("Enter"); await 쉬기(랜덤(150)); }
           const 첫줄 = String((블록.글 || []).find(Boolean) || "").replace(/\s+/g, "").slice(0, 12);
           const 곳 = 첫줄 ? await 들어간곳(첫줄) : [];
