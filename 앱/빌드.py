@@ -106,5 +106,8 @@ if "네이버 글" not in 코덱스부분:
     "커밋": 기존.get("커밋", ""), "진입": {"승인글": "앱/승인글.mjs", "네이버": "앱/네이버.mjs"},
     "수강코드": 원목록.get("수강코드", []), "파일": sorted(set(파일)),
 }
+# 맥은 한글 파일 이름을 자모로 쪼갠(NFD) 모양으로 준다. GitHub 는 붙인(NFC) 이름이라 주소가 404 가 된다 (2026-09-23 실측: 글만들기.mjs).
+import unicodedata
+목록["파일"] = sorted(set(unicodedata.normalize("NFC", f) for f in 목록["파일"]))
 목록경로.write_text(json.dumps(목록, ensure_ascii=False, indent=2) + "\n", encoding="utf8")
 print(f"빌드 끝: 1주차 {W1.name} → 2주차 {W2.name} · 프로그램 파일 {len(목록['파일'])}개")
