@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23j";
+export const 버전 = "2026-09-23k";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -392,7 +392,9 @@ export async function 실행(옵션 = {}) {
       if (제목칸) { await 좌표클릭(제목칸.loc); await 쉬기(300); await 키(전체); await 쉬기(200); await 키("Delete"); await 쉬기(400); }
       const 비운뒤 = await 에디터상태();
       적기("다시쓰기", { 남은본문글자: 비운뒤.본문글자수, 남은제목: 비운뒤.제목, 남은부품: (비운뒤.컴포넌트 || []).length });
-      if ((비운뒤.본문글자수 || 0) > 30 || 비운뒤.제목) { 적기("다시쓰기", { 실패: "본문을 비우지 못했습니다" }); return 마무리(); }
+      // 빈 칸에는 회색 안내 글자("제목", 본문 안내 문구)가 보인다 (2026-09-23 실측: 비운 뒤 제목 "제목", 본문 17자). 그건 남은 글이 아니다.
+      const 남은제목 = String(비운뒤.제목 || "").replace(/\s+/g, "");
+      if ((비운뒤.본문글자수 || 0) > 60 || (남은제목 && 남은제목 !== "제목" && 원고.제목.replace(/\s+/g, "").startsWith(남은제목.slice(0, 6)))) { 적기("다시쓰기", { 실패: "본문을 비우지 못했습니다" }); return 마무리(); }
     }
 
     // 4. 제목
