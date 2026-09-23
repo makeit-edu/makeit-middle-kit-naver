@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23h";
+export const 버전 = "2026-09-23i";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -333,6 +333,19 @@ export async function 실행(옵션 = {}) {
       return true;
     };
     const 글감닫기 = (이름, 때) => 글감끄기(`${이름} ${때}`);
+    // 표·인용구를 넣기 전에 빈 줄을 하나 더 만들어 두고(Enter → 위로), 넣은 뒤에는 그 부품 바로 아래 빈 줄을 눌러 커서를 옮긴다.
+    // 2026-09-23 실측: 숨은 "본문 추가" 버튼을 못 눌러 커서가 표 마지막 칸에 남았고, 뒤 문단·소제목이 전부 그 칸 안으로 들어갔다.
+    const 빈줄만들기 = async () => { await 키("Enter"); await 쉬기(250); await 키("Up"); await 쉬기(250); };
+    const 아래로나가기 = async (부품) => {
+      await 키("Escape"); await 쉬기(300);
+      const 다음줄 = F.locator(`.se-component.${부품} + .se-component.se-text .se-text-paragraph`).last();
+      if ((await 다음줄.count().catch(() => 0)) > 0) { await 좌표클릭(다음줄); await 쉬기(250); await 키("End"); return "아래 빈 줄"; }
+      return `본문 추가: ${await 본문추가하기()}`;
+    };
+    // 문단이 표·인용구 안으로 잘못 들어갔는지 확인 (들어갔으면 기록)
+    const 들어간곳 = (앞) => F.locator("body").first().evaluate((el, 앞) => [...el.ownerDocument.querySelectorAll(".se-component")]
+      .filter((c) => (c.innerText || "").replace(/\s+/g, "").includes(앞))
+      .map((c) => (String(c.className).match(/se-(text|table|quotation|sectionTitle)\b/) || [])[1] || "?"), 앞).catch(() => []);
     const 본문추가하기 = async () => {
       const b = await 찾기(R.본문추가버튼);
       if (!b) return "버튼 없음";
@@ -394,7 +407,10 @@ export async function 실행(옵션 = {}) {
       try {
         if (블록.종류 === "문단") {
           for (const 줄 of 블록.글) { if (줄) await 타이핑(줄); await 키("Enter"); await 쉬기(랜덤(150)); }
-          적기(이름, { 줄수: 블록.글.length });
+          const 첫줄 = String((블록.글 || []).find(Boolean) || "").replace(/\s+/g, "").slice(0, 12);
+          const 곳 = 첫줄 ? await 들어간곳(첫줄) : [];
+          if (곳.length && !곳.includes("text")) 적기(이름, { 경고: `문단이 ${곳.join(",")} 안으로 들어갔습니다`, 첫줄 });
+          else 적기(이름, { 줄수: 블록.글.length });
 
         } else if (블록.종류 === "소제목") {
           await 타이핑(블록.글);
@@ -427,17 +443,17 @@ export async function 실행(옵션 = {}) {
           적기(이름, { 글: 블록.글, 방법, 소제목목록: 후.소제목, 컴포넌트: 후.컴포넌트 });
 
         } else if (블록.종류 === "인용구") {
+          await 빈줄만들기();
           await 버튼클릭(R.인용구버튼, "인용구");
           await 쉬기(1300);
           await 타이핑(블록.글);
           await 쉬기(600);
-          await 키("Escape");
-          await 쉬기(300);
-          await 본문추가하기();
+          const 나감 = await 아래로나가기("se-quotation");
           const 후 = await 에디터상태();
-          적기(이름, { 글: 블록.글.slice(0, 30), 인용구목록: 후.인용구 });
+          적기(이름, { 글: 블록.글.slice(0, 30), 인용구목록: 후.인용구, 나감 });
 
         } else if (블록.종류 === "표") {
+          await 빈줄만들기();
           await 버튼클릭(R.표버튼, "표");
           await 쉬기(1800);
           // 방금 만든 표 = 문서의 마지막 표. 첫 표를 잡으면 두 번째 표부터 엉뚱한 곳(화면 밖)을 누른다 (2026-09-17 실측).
@@ -451,11 +467,9 @@ export async function 실행(옵션 = {}) {
             await 타이핑(블록.칸[k]);
             await 쉬기(200);
           }
-          await 키("Escape");
-          await 쉬기(300);
-          await 본문추가하기();
+          const 나감 = await 아래로나가기("se-table");
           const 후 = await 에디터상태();
-          적기(이름, { 표칸수: 칸수, 넣은칸: 블록.칸.length, 화면칸: 후.표칸 });
+          적기(이름, { 표칸수: 칸수, 넣은칸: 블록.칸.length, 화면칸: 후.표칸, 나감 });
 
         } else if (블록.종류 === "구분선") {
           await 버튼클릭(R.구분선버튼, "구분선");
