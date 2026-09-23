@@ -16,15 +16,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23b";
+export const 버전 = "2026-09-23c";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 const 프로젝트 = path.resolve(여기, "..");
 
 // 2026-09-23 진현님: 글 1개 50원 이하 (승인글처럼). 예전 gpt-5.2 + gpt-image-2 보통 화질은 약 390원이었고 그중 사진 3장이 85%.
-// 그래서 승인글과 같은 조합으로 바꿨다: 글 gpt-5.4-mini, 사진 gpt-image-1-mini 저화질.
+// 그래서 글은 승인글과 같은 gpt-5.4-mini. 사진은 진현님 결정으로 한 단계 위 gpt-image-2 저화질 (장당 약 10원, 1-mini 저화질은 약 4원이지만 품질 차이가 큼).
+// 글 1개 약 64원 (글 약 33원 + 사진 3장 약 31원, 2026-09-23 실측).
 const 글모델 = "gpt-5.4-mini";
-const 그림모델 = "gpt-image-1-mini";
+const 그림모델 = "gpt-image-2";
 const 그림화질 = "low";
 
 async function 오픈AI(키, 경로, body) {
