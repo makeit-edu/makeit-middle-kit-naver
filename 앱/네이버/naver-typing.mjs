@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23m";
+export const 버전 = "2026-09-23n";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -266,11 +266,17 @@ export async function 실행(옵션 = {}) {
       let 막대위 = f.h;
       try { 막대위 = await F.locator(".se-floating-material-container").first().evaluate((el) => { const b = el.getBoundingClientRect(); return b.height > 0 ? b.top : 1e9; }, undefined); } catch {}
       const 위한계 = 160, 아래한계 = () => Math.min(f.h - 40, 막대위 - 30);
-      for (let i = 0; i < 6 && (r.y < 위한계 || r.y > 아래한계()); i++) {
+      // 위쪽 도구 모음(문단 서식·인용구·표·사진·저장 버튼)은 화면에 붙어 있어 스크롤해도 제자리다. 그런데 150px 안쪽이라 '위로 가려졌다' 로 보고
+      // 누를 때마다 위로 6번씩 스크롤했다. 글 쓰는 도중 화면이 맨 위로 튀었다 내려오던 원인 (2026-09-23 진현님 영상: 소제목마다 반복).
+      // 그래서 붙어 있는 것(fixed·sticky 안에 든 것)은 스크롤하지 않고, 스크롤해도 자리가 안 바뀌면 바로 멈춘다.
+      const 붙음 = await loc.evaluate((el) => { for (let e = el; e && e.nodeType === 1; e = e.parentElement) { const p = getComputedStyle(e).position; if (p === "fixed" || p === "sticky") return true; } return false; }).catch(() => false);
+      for (let i = 0; !붙음 && i < 6 && (r.y < 위한계 || r.y > 아래한계()); i++) {
         const 위로 = r.y < 위한계;
         try { await ax.scroll([Math.round(f.x + f.w / 2), Math.round(f.y + f.h / 2)], 위로 ? "up" : "down", 1); } catch {}
         await 쉬기(450);
+        const 전y = r.y;
         r = await 재기(); f = await 프레임위치();
+        if (Math.abs(r.y - 전y) < 2) break;
       }
       if (r.y < 0 || r.y > f.h) throw new Error(`요소를 화면 안으로 못 가져옴 (y=${Math.round(r.y)}, 화면높이=${f.h})`);
       return { x: Math.round(f.x + r.x), y: Math.round(f.y + r.y), w: r.w, h: r.h };
@@ -281,13 +287,16 @@ export async function 실행(옵션 = {}) {
       await ax.click([p.x, p.y], 옵션.clickCount ? { clickCount: 옵션.clickCount } : undefined);
       return p;
     };
+    let 맥 = null;
+    const 맥인가 = async () => { if (맥 === null) 맥 = /Mac/i.test(String(await pw.evaluate(() => navigator.platform).catch(() => ""))); return 맥; };
     // 줄 끝에 커서를 둔다 (글을 이어 치거나 Enter 로 새 줄을 만들기 전에)
     const 끝클릭 = async (loc) => {
       const p = await 좌표(loc, 글끝);
       if (!(p.w > 0 && p.h > 0)) throw new Error("요소가 화면에 없음(크기 0)");
       await ax.click([p.x, p.y]);
       await 쉬기(150);
-      await 키("End"); // 윈도우는 End 로도 한 번 더 확실히 (맥은 아무 일도 안 일어난다)
+      // 윈도우는 End 로 한 번 더 확실히 줄 끝에. 맥은 End 가 커서는 안 옮기고 화면만 맨 아래로 튀게 해서 누르지 않는다.
+      if (!(await 맥인가())) await 키("End");
       return p;
     };
     // 여러 후보 셀렉터 중 화면에 있는 첫 번째
