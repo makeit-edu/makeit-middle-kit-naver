@@ -21,7 +21,7 @@ import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {처방 as 승인글처방, 잠금으로} from "./승인글.mjs";
 
-export const 버전 = "2026-09-23d";
+export const 버전 = "2026-09-23e";
 
 const 여기 = dirname(fileURLToPath(import.meta.url));
 const 프로그램폴더 = join(여기, "네이버");
@@ -203,7 +203,14 @@ export async function 쓰기(옵션 = {}) {
   if (!옵션.작업폴더 || !옵션.원고) throw new Error("작업폴더·원고 가 필요합니다");
   return 잠금으로({작업폴더: 옵션.작업폴더, 이름: "네이버-쓰기", 일: () => 쓰기본체(옵션)});
 }
+// 원고 경로를 절대경로로 — 코덱스가 "네이버 승인글/03_쓴글/…/원고.json" 이나 폴더 이름만 넘길 때가 있다 (2026-09-23 실측).
+function 원고찾기(작업폴더, 원고) {
+  const 이름 = String(원고 || "").trim();
+  const 후보 = [이름, join(작업폴더, 이름), join(데이터폴더(작업폴더), 이름), join(쓴글폴더(작업폴더), 이름), join(쓴글폴더(작업폴더), 이름, "원고.json"), join(작업폴더, 이름, "원고.json")];
+  return 후보.find((p) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p) ? existsSync(p) && p.endsWith(".json") : false) || 이름;
+}
 async function 쓰기본체({agent, 작업폴더, 원고, 시작블록 = 0} = {}) {
+  원고 = 원고찾기(작업폴더, 원고);
   if (!agent) return {결과: "멈춤", 할일: 처방또는프로그램("크롬 연결 없음")};
   const 타이핑 = await 불러("naver-typing.mjs");
   let r;
