@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23i";
+export const 버전 = "2026-09-23j";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -157,6 +157,11 @@ export async function 실행(옵션 = {}) {
       이어쓰기 = true;
       if (tab) 적기("탭잡기", { 방법: `이어쓰기 — 이 세션의 글쓰기 탭에서 블록${시작블록 + 1}부터` });
       else 적기("탭잡기", { 안내: "이 세션 탭 목록에 없어 열린 글쓰기 탭을 다시 잡습니다" });
+    }
+    // 다시쓰기(점검에서 문제가 나와 같은 탭에서 처음부터 다시 쓰기) — 기억해 둔 탭을 쓴다. 같은 임시저장 글이 고쳐진다.
+    if (옵션.다시쓰기 && !tab) {
+      try { const 전탭 = globalThis.__메킷네이버탭; if (전탭 && /blog\.naver\.com/.test(String(await Promise.resolve(전탭.url())))) tab = 전탭; } catch {}
+      if (tab) 적기("탭잡기", { 방법: "다시쓰기 — 같은 글쓰기 탭" });
     }
     // 이어쓰기가 아니면 수강생이 열어 둔 헌 글쓰기 탭은 잡지 않고 항상 새 탭을 연다.
     // 2026-09-23 실측: 앞선 실패로 남은 글쓰기 탭을 잡았더니 편집기를 못 읽었다 (새 탭은 3초 만에 편집기가 잡힘).
@@ -374,6 +379,22 @@ export async function 실행(옵션 = {}) {
       await 쉬기(400);
     }
 
+    // 다시쓰기면 본문·제목을 비운다 (전체 선택 → 지우기)
+    if (옵션.다시쓰기 && !이어쓰기) {
+      const 플랫폼 = await pw.evaluate(() => navigator.platform).catch(() => "");
+      const 전체 = /Mac/i.test(String(플랫폼)) ? "super+a" : "ctrl+a";
+      const 본문첫 = F.locator(R.본문문단).first();
+      if ((await 본문첫.count().catch(() => 0)) > 0) {
+        await 좌표클릭(본문첫); await 쉬기(300);
+        for (let i = 0; i < 2; i++) { await 키(전체); await 쉬기(300); await 키("Delete"); await 쉬기(600); }
+      }
+      const 제목칸 = await 찾기(R.제목칸);
+      if (제목칸) { await 좌표클릭(제목칸.loc); await 쉬기(300); await 키(전체); await 쉬기(200); await 키("Delete"); await 쉬기(400); }
+      const 비운뒤 = await 에디터상태();
+      적기("다시쓰기", { 남은본문글자: 비운뒤.본문글자수, 남은제목: 비운뒤.제목, 남은부품: (비운뒤.컴포넌트 || []).length });
+      if ((비운뒤.본문글자수 || 0) > 30 || 비운뒤.제목) { 적기("다시쓰기", { 실패: "본문을 비우지 못했습니다" }); return 마무리(); }
+    }
+
     // 4. 제목
     if (!이어쓰기) {
       const t = await 찾기(R.제목칸);
@@ -527,6 +548,36 @@ export async function 실행(옵션 = {}) {
       적기("임시저장", { 셀렉터: 저장.셀렉터, 저장직전: 전 });
     }
     if (이어서) { 적기("이어서", { ...이어서, 남은블록: (원고.블록 || []).length - 이어서.시작블록 }); return 마무리(이어서); }
+    // 8. 점검 — 원고와 네이버 화면을 대조한다 (2026-09-23 진현님 지시: 다 쓰고 잘못된 곳이 있는지 보고 고치기)
+    try {
+      const 사진확인 = !기록.some((r) => r.사진건너뜀);
+      const 요약 = { 제목: 원고.제목, 사진확인, 블록: (원고.블록 || []).map((b) => ({ 종류: b.종류, 글: b.글, 칸: b.칸 })) };
+      const 결과 = await F.locator("body").first().evaluate((el, 원) => {
+        const d = el.ownerDocument, 정 = (t) => String(t || "").replace(/\s+/g, ""), 줄 = (t) => [].concat(t || []).join(" ");
+        const 문제 = [];
+        const 제목 = 정((d.querySelector(".se-documentTitle") || {}).innerText);
+        if (!제목.startsWith(정(원.제목).slice(0, 10))) 문제.push("제목이 원고와 다릅니다");
+        const 종류 = (c) => (String(c.className).match(/se-(text|table|quotation|sectionTitle|image|horizontalLine)\b/) || [])[1] || "?";
+        const 부품 = [...d.querySelectorAll(".se-component")].filter((c) => !c.classList.contains("se-documentTitle")).map((c) => ({ c, 종류: 종류(c), 글: 정(c.innerText) }));
+        const 곳 = (앞) => 부품.filter((p) => p.글.includes(앞)).map((p) => p.종류);
+        for (const b of 원.블록) {
+          const 보기 = 줄(b.글).slice(0, 18);
+          if (b.종류 === "소제목") { const g = 곳(정(줄(b.글)).slice(0, 10)); if (!g.includes("sectionTitle")) 문제.push(`소제목 "${보기}" 이 ${g.length ? "소제목 서식이 아니에요" : "빠졌어요"}`); }
+          else if (b.종류 === "인용구") { const g = 곳(정(줄(b.글)).slice(0, 10)); if (!g.includes("quotation")) 문제.push(`인용구 "${보기}" 이 ${g.length ? "인용구가 아니에요" : "빠졌어요"}`); }
+          else if (b.종류 === "문단") { const 첫 = 정([].concat(b.글 || []).find(Boolean)).slice(0, 12); if (!첫) continue; const g = 곳(첫); if (!g.length) 문제.push(`문단 "${보기}" 이 빠졌어요`); else if (!g.includes("text")) 문제.push(`문단 "${보기}" 이 ${g[0] === "table" ? "표" : g[0] === "quotation" ? "인용구" : g[0] === "sectionTitle" ? "소제목" : g[0]} 안에 들어갔어요`); }
+        }
+        const 표들 = 부품.filter((p) => p.종류 === "table");
+        원.블록.filter((b) => b.종류 === "표").forEach((b, i) => {
+          const t = 표들[i];
+          if (!t) { 문제.push(`표 ${i + 1}개째가 빠졌어요`); return; }
+          const 칸 = [...t.c.querySelectorAll("td")].map((td) => 정(td.innerText));
+          if ((b.칸 || []).some((v, k) => 칸[k] !== 정(v))) 문제.push(`표 ${i + 1}개째 칸 내용이 원고와 달라요`);
+        });
+        if (원.사진확인) { const 원사진 = 원.블록.filter((b) => b.종류 === "사진").length, 화면사진 = 부품.filter((p) => p.종류 === "image").length; if (화면사진 < 원사진) 문제.push(`사진이 ${원사진}장 중 ${화면사진}장만 들어갔어요`); }
+        return { 문제 };
+      }, 요약);
+      적기("점검", { 문제: 결과.문제 || [] });
+    } catch (e) { 적기("점검", { 문제: [], 점검못함: String(e?.message || e).slice(0, 120) }); }
     return 마무리();
   } catch (e) {
     적기("오류", { 내용: String(e?.message || e), 어디서: (e?.stack || "").split("\n").slice(0, 3).join(" | ") });

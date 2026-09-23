@@ -21,7 +21,7 @@ import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {처방 as 승인글처방, 잠금으로} from "./승인글.mjs";
 
-export const 버전 = "2026-09-23e";
+export const 버전 = "2026-09-23f";
 
 const 여기 = dirname(fileURLToPath(import.meta.url));
 const 프로그램폴더 = join(여기, "네이버");
@@ -215,7 +215,11 @@ async function 쓰기본체({agent, 작업폴더, 원고, 시작블록 = 0} = {}
   const 타이핑 = await 불러("naver-typing.mjs");
   let r;
   try {
-    r = await 타이핑.실행({agent, 원고, 시작블록: Number(시작블록) || 0, 데이터폴더: 데이터폴더(작업폴더)});
+    // 다시쓰기: 점검에서 문제가 나오면 같은 탭에서 한 번만 처음부터 다시 쓴다. 대본은 "이어서"(시작블록 0) 로 받아 그대로 다시 부른다.
+    const 상태판 = globalThis.__메킷다시쓰기;
+    const 다시쓰기 = Number(시작블록) === 0 && 상태판 && 상태판.원고 === 원고 && 상태판.단계 === "대기";
+    if (다시쓰기) 상태판.단계 = "진행";
+    r = await 타이핑.실행({agent, 원고, 시작블록: Number(시작블록) || 0, 데이터폴더: 데이터폴더(작업폴더), 다시쓰기});
   } catch (e) {
     return {결과: "멈춤", 할일: 처방또는프로그램(String(e?.message || e))};
   }
@@ -228,8 +232,16 @@ async function 쓰기본체({agent, 작업폴더, 원고, 시작블록 = 0} = {}
     const 사진빠짐 = 기록.some((x) => x.사진건너뜀);
     const 빠진블록 = 기록.filter((x) => x.건너뜀).map((x) => x.단계);
     const 빠진이유 = 기록.filter((x) => x.건너뜀 || x.사진건너뜀 || x.경고).map((x) => `${x.단계}: ${String(x.건너뜀 || x.사진건너뜀 || x.경고).slice(0, 200)}`);
-    try { await writeFile(join(dirname(원고), "결과.json"), JSON.stringify({임시저장: true, 때: new Date().toISOString(), 사진빠짐, 빠진블록}, null, 2), "utf8"); } catch {}
-    return {결과: "됨", 걸린시간초: r.걸린시간초, 사진빠짐, 빠진블록, 진단: 빠진이유};
+    const 점검 = [...기록].reverse().find((x) => x.단계 === "점검") || {문제: []};
+    const 문제 = 점검.문제 || [];
+    const 상태판2 = globalThis.__메킷다시쓰기;
+    if (문제.length && !(상태판2 && 상태판2.원고 === 원고 && 상태판2.단계 === "진행")) {
+      globalThis.__메킷다시쓰기 = {원고, 단계: "대기", 첫점검: 문제};
+      return {결과: "이어서", 원고, 시작블록: 0, 다시쓰는중: true, 걸린시간초: r.걸린시간초, 진단: [...빠진이유, ...문제.map((m) => `점검: ${m}`)]};
+    }
+    globalThis.__메킷다시쓰기 = null;
+    try { await writeFile(join(dirname(원고), "결과.json"), JSON.stringify({임시저장: true, 때: new Date().toISOString(), 사진빠짐, 빠진블록, 점검문제: 문제}, null, 2), "utf8"); } catch {}
+    return {결과: "됨", 걸린시간초: r.걸린시간초, 사진빠짐, 빠진블록, 확인할곳: 문제, 진단: 빠진이유};
   }
   const 실패 = [...기록].reverse().find((x) => x.실패 || x.단계 === "오류") || {};
   const 문구 = String(실패.실패 || 실패.내용 || r.결과 || "");
