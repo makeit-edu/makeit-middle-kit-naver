@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23n";
+export const 버전 = "2026-09-23p";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -244,18 +244,19 @@ export async function 실행(옵션 = {}) {
     const 가운데 = (el) => { const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height }; };
     // 글 끝 자리 — 마지막 글자 바로 오른쪽. 가운데를 누르면 긴 줄은 글 한가운데에 커서가 선다.
     // 맥 크롬은 End 키로 커서가 줄 끝에 가지 않는다. 그래서 가운데 클릭 → End → Enter 가 긴 소제목을 가운데서 쪼갰다 (2026-09-23 실측: 17자 소제목이 사라지고 다음 문단이 소제목 안으로 들어감).
+    // 코덱스의 화면 읽기에는 createTreeWalker·Range 가 없다 (2026-09-23 실측: "createTreeWalker is not a function"). 줄 속 글자 조각(span)의 끝으로 잰다.
     const 글끝 = (el) => {
       const b = el.getBoundingClientRect();
-      const 걷기 = el.ownerDocument.createTreeWalker(el, 4);
-      let 마지막 = null;
-      for (let n = 걷기.nextNode(); n; n = 걷기.nextNode()) if (n.textContent.replace(/[​﻿]/g, "").trim()) 마지막 = n;
-      if (!마지막) return { x: b.left + Math.min(20, b.width / 2), y: b.top + b.height / 2, w: b.width, h: b.height };
-      const 범위 = el.ownerDocument.createRange();
-      범위.selectNodeContents(마지막);
-      const 칸들 = 범위.getClientRects();
-      const e = 칸들[칸들.length - 1];
-      if (!e) return { x: b.right - 4, y: b.bottom - 8, w: b.width, h: b.height };
-      return { x: Math.min(b.right - 3, e.right + 12), y: e.top + e.height / 2, w: b.width, h: b.height };
+      let e = null;
+      try {
+        const 조각 = el.querySelectorAll("span");
+        for (let i = 조각.length - 1; i >= 0 && !e; i--) {
+          const r = 조각[i].getBoundingClientRect();
+          if (r.width > 0 && String(조각[i].innerText || 조각[i].textContent || "").trim()) e = r;
+        }
+      } catch {}
+      if (!e) return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height };
+      return { x: Math.min(b.right - 3, e.right + 8), y: e.bottom - Math.min(12, e.height / 2), w: b.width, h: b.height };
     };
     const 좌표 = async (loc, 측정 = 가운데) => {
       const 재기 = () => loc.evaluate(측정);
@@ -291,7 +292,8 @@ export async function 실행(옵션 = {}) {
     const 맥인가 = async () => { if (맥 === null) 맥 = /Mac/i.test(String(await pw.evaluate(() => navigator.platform).catch(() => ""))); return 맥; };
     // 줄 끝에 커서를 둔다 (글을 이어 치거나 Enter 로 새 줄을 만들기 전에)
     const 끝클릭 = async (loc) => {
-      const p = await 좌표(loc, 글끝);
+      // 끝 자리를 못 재면 예전처럼 가운데를 누른다 (멈추지 않게)
+      const p = await 좌표(loc, 글끝).catch(() => 좌표(loc));
       if (!(p.w > 0 && p.h > 0)) throw new Error("요소가 화면에 없음(크기 0)");
       await ax.click([p.x, p.y]);
       await 쉬기(150);
@@ -517,6 +519,8 @@ export async function 실행(옵션 = {}) {
           else 적기(이름, { 줄수: 블록.글.length });
 
         } else if (블록.종류 === "소제목") {
+          // 소제목 위아래로 빈 줄 하나씩 (2026-09-23 진현님 지시). 앞 블록이 끝나면 커서는 빈 줄에 있으니 Enter 한 번이면 위 빈 줄이 생긴다.
+          if (i > 0) { await 본문서식으로(); await 키("Enter"); await 쉬기(250); }
           await 타이핑(블록.글);
           await 쉬기(1000);
           const 앞머리 = 블록.글.slice(0, 12);
@@ -556,6 +560,8 @@ export async function 실행(옵션 = {}) {
             await 끝에서엔터();
             고침 = (await 온전()) ? "쪼개진 소제목을 붙여 다시 줄바꿈" : "소제목이 쪼개졌는데 못 붙임";
           }
+          // 아래 빈 줄: 새 줄을 본문으로 돌리고 Enter 한 번
+          await 본문서식으로(); await 키("Enter"); await 쉬기(250);
           const 후 = await 에디터상태();
           적기(이름, { 글: 블록.글, 방법, 소제목목록: 후.소제목, 컴포넌트: 후.컴포넌트, ...(고침 ? { [고침.includes("못") ? "경고" : "고침"]: 고침 } : {}) });
 
