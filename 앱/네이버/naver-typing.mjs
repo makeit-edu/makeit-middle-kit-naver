@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23f";
+export const 버전 = "2026-09-23h";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -215,7 +215,11 @@ export async function 실행(옵션 = {}) {
       const 재기 = () => loc.evaluate((el) => { const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height }; });
       let r = await 재기();
       let f = await 프레임위치();
-      const 위한계 = 160, 아래한계 = () => f.h - 40;
+      // 화면 아래쪽에는 "전체 글감 | 검색" 막대가 늘 떠 있다. 그 아래(가려진 곳)를 누르면 글감 검색칸이 눌려 글자가 그리로 들어간다 (2026-09-23 실측).
+      // 그래서 누를 자리는 그 막대보다 30px 위까지만 인정하고, 더 아래면 스크롤해서 올린다.
+      let 막대위 = f.h;
+      try { 막대위 = await F.locator(".se-floating-material-container").first().evaluate((el) => { const b = el.getBoundingClientRect(); return b.height > 0 ? b.top : 1e9; }, undefined); } catch {}
+      const 위한계 = 160, 아래한계 = () => Math.min(f.h - 40, 막대위 - 30);
       for (let i = 0; i < 6 && (r.y < 위한계 || r.y > 아래한계()); i++) {
         const 위로 = r.y < 위한계;
         try { await ax.scroll([Math.round(f.x + f.w / 2), Math.round(f.y + f.h / 2)], 위로 ? "up" : "down", 1); } catch {}
@@ -252,7 +256,12 @@ export async function 실행(옵션 = {}) {
       for (const 어절 of String(문장).split(/(?<=\s)/)) {
         for (let i = 0; i < 어절.length; i += 4) 조각들.push(어절.slice(i, i + 4));
       }
-      for (const 조각 of 조각들) { await 글넣기(조각); await 쉬기(랜덤(딜레이)); }
+      for (const 조각 of 조각들) {
+        await 글넣기(조각);
+        // 조각을 넣은 뒤 글감 창이 떴으면 그 조각은 검색칸으로 들어간 것이다. 끄고 커서를 되돌린 뒤 그 조각만 다시 넣는다 (최대 2번).
+        for (let 재시도 = 0; 재시도 < 2 && (await 글감끄기(`'${조각}' 입력`)); 재시도++) await 글넣기(조각);
+        await 쉬기(랜덤(딜레이));
+      }
     };
     const 시간예산초 = 옵션.시간예산초 ?? R.시간예산초 ?? 180;
     const 시간초과 = () => (Date.now() - 시작) / 1000 > 시간예산초;
@@ -291,23 +300,39 @@ export async function 실행(옵션 = {}) {
       }
       return "팝업 있는데 버튼 못 찾음";
     };
-    // 글감 검색 창 — 열리면 "글감을 검색해 보세요" 입력칸이 커서를 가져가 그 뒤 글자가 전부 거기로 들어간다 (2026-09-23 실측).
+    // 글감 검색 창 — 커서가 글감 검색칸으로 가면 그 뒤 글자가 전부 거기로 들어간다 (2026-09-23 실측).
+    // 주의: 화면 아래 "전체 글감 | 검색" 막대는 닫혀 있어도 늘 보인다. 그래서 '검색칸이 보인다' 는 열림이 아니다.
+    // 열림 = 커서가 검색칸에 있다 또는 큰 글감 창(책·음악 탭, 높이 150px 넘는 판)이 떠 있다. 닫을 때는 X 를 누른다 (진현님 지시). 글감 버튼은 누르지 않는다(누르면 열린다).
     const 글감상태 = () => F.locator("body").first().evaluate((el) => {
-      const d = el.ownerDocument, i = d.querySelector(".se-flayer-unified-search-input"), a = d.activeElement;
-      const 보임 = !!(i && i.getClientRects().length && i.getBoundingClientRect().height > 0);
-      return { 열림: 보임 || a === i, 커서: a ? a.tagName + "." + String(a.className).slice(0, 40) : "" };
+      const d = el.ownerDocument, a = d.activeElement;
+      const 보임 = (e) => { const r = e.getBoundingClientRect(); return e.getClientRects().length > 0 && r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden"; };
+      const 입력 = d.querySelector(".se-flayer-unified-search-input");
+      const 판 = [...d.querySelectorAll(".se-floating-material-container *, [class*=material-panel], [class*=flayer-unified-result], [class*=flayer-unified-content]")].find((e) => 보임(e) && e.getBoundingClientRect().height > 150);
+      const 열림 = a === 입력 || !!판;
+      let X = null;
+      if (열림) {
+        const 후보 = [...d.querySelectorAll(".se-floating-material-container button, [class*=flayer] button")].filter(보임);
+        const 닫기 = 후보.find((b) => /close|닫기/i.test(String(b.className) + " " + (b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.innerText || "")));
+        if (닫기) { const r = 닫기.getBoundingClientRect(); X = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+      }
+      return { 열림, 판: !!판, 검색칸커서: a === 입력, X };
     }).catch(() => ({ 열림: false }));
-    const 글감닫기 = async (이름, 때) => {
+    let 글감끈횟수 = 0;
+    const 글감끄기 = async (이름) => {
       const 전 = await 글감상태();
       if (!전.열림) return false;
-      적기("글감창", { 경고: `${이름} ${때} 글감 검색 창이 열려 있어 닫았습니다`, 커서: 전.커서 });
-      await 키("Escape"); await 쉬기(500);
-      if ((await 글감상태()).열림) { try { await 버튼클릭([".se-search-toolbar-button"], "글감"); } catch {} await 쉬기(700); }
-      const 마지막 = F.locator(".se-component.se-text .se-text-paragraph, .se-component.se-sectionTitle .se-text-paragraph").last();
+      글감끈횟수 += 1;
+      적기("글감창", { 경고: `${이름} 에서 글감 창이 떠서 껐습니다`, 큰창: 전.판, 검색칸커서: 전.검색칸커서, X찾음: !!전.X });
+      if (전.X) { const f = await 프레임위치(); await ax.click([Math.round(f.x + 전.X.x), Math.round(f.y + 전.X.y)]); await 쉬기(500); }
+      if ((await 글감상태()).열림) { await 키("Escape"); await 쉬기(400); }
+      // 커서를 글 끝으로 되돌린다 (좌표클릭은 글감 막대 위쪽만 누른다)
+      const 마지막 = F.locator(".se-component.se-text .se-text-paragraph, .se-component.se-sectionTitle .se-text-paragraph, .se-quotation .se-text-paragraph").last();
       if ((await 마지막.count().catch(() => 0)) > 0) { try { await 좌표클릭(마지막); await 키("End"); } catch {} }
       await 쉬기(300);
+      if ((await 글감상태()).열림) 적기("글감창", { 경고: `${이름}: 껐는데도 글감 창이 남아 있습니다` });
       return true;
     };
+    const 글감닫기 = (이름, 때) => 글감끄기(`${이름} ${때}`);
     const 본문추가하기 = async () => {
       const b = await 찾기(R.본문추가버튼);
       if (!b) return "버튼 없음";
