@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23c";
+export const 버전 = "2026-09-23d";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 const 프로젝트 = path.resolve(여기, "..");
@@ -158,6 +158,32 @@ ${후킹규칙}
     });
     쓴돈.push({ model: 글모델, input_tokens: j2.usage?.input_tokens || 0, output_tokens: j2.usage?.output_tokens || 0 });
     try { const 늘린 = 꺼내기(j2); if (글자수(늘린) > 글자수(원고)) 원고 = 늘린; } catch {}
+  }
+  // 사진 자리 채우기 — 싼 모델이 사진 블록을 통째로 빼먹을 때가 있다 (2026-09-23 실측: 33블록 중 사진 0).
+  // 모자란 만큼 소제목에 맞는 영어 장면 묘사를 따로 받아, 소제목 사이에 고르게 넣는다. 수강생에게는 알리지 않는다.
+  const 있는사진 = (원고.블록 || []).filter((b) => b.종류 === "사진").length;
+  if (있는사진 < 사진수) {
+    const 모자람 = 사진수 - 있는사진;
+    const 소제목들 = (원고.블록 || []).map((b, i) => ({ i, b })).filter((x) => x.b.종류 === "소제목");
+    const 고른 = 소제목들.length ? Array.from({ length: 모자람 }, (_, k) => 소제목들[Math.min(소제목들.length - 1, Math.floor(((k + 0.5) * 소제목들.length) / 모자람))]) : [];
+    let 장면들 = [];
+    try {
+      const j3 = await 오픈AI(키, "/responses", {
+        model: 글모델,
+        input: [{ role: "user", content: `블로그 글 "${원고.제목}" 에 넣을 사진 ${모자람}장의 장면을 영어로 묘사해라. 각 사진은 아래 소제목 하나씩의 메시지를 상징하는 장면이다. 사물·장소·상황·분위기만, 글자가 들어갈 만한 것(간판·문서·화면·책)과 사람 얼굴은 넣지 않는다. 1~2문장씩.\n${고른.map((x, k) => `${k + 1}. ${[].concat(x.b.글).join(" ")}`).join("\n")}` }],
+        text: { format: { type: "json_schema", name: "scenes", strict: true, schema: { type: "object", additionalProperties: false, properties: { scenes: { type: "array", items: { type: "string" } } }, required: ["scenes"] } } },
+        reasoning: { effort: "low" },
+      });
+      쓴돈.push({ model: 글모델, input_tokens: j3.usage?.input_tokens || 0, output_tokens: j3.usage?.output_tokens || 0 });
+      장면들 = 꺼내기(j3).scenes || [];
+    } catch {}
+    // 뒤에서부터 넣어야 앞 위치가 안 밀린다. 소제목 바로 다음 문단 뒤에 넣는다.
+    const 넣을곳 = 고른.map((x, k) => {
+      let 위치 = x.i + 1;
+      if (원고.블록[위치] && 원고.블록[위치].종류 === "문단") 위치 += 1;
+      return { 위치, 프롬프트: 장면들[k] || `A calm, warm everyday scene that suggests: ${원고.제목}` };
+    }).sort((a, b) => b.위치 - a.위치);
+    for (const x of 넣을곳) 원고.블록.splice(x.위치, 0, { 종류: "사진", 글: [], 칸: [], 프롬프트: x.프롬프트 });
   }
   Object.defineProperty(원고, "_사용량", { value: 쓴돈, enumerable: false });
   return 원고;

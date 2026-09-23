@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23c";
+export const 버전 = "2026-09-23d";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -291,7 +291,9 @@ export async function 실행(옵션 = {}) {
       await ax.click([p.x, p.y]); await 쉬기(800); return "누름";
     };
 
-    // 3. 팝업 → 시작 상태
+    // 3. 편집기가 뜰 때까지 기다린다 (최대 20초). 새 탭은 5초 안에 편집기가 안 뜰 때가 있다 (2026-09-23 실측: "편집기 프레임을 못 찾았습니다").
+    for (let i = 0; i < 20; i++) { if ((await 에디터상태()).에디터) break; await 쉬기(1000); }
+    // 팝업 → 시작 상태
     if (!이어쓰기) 적기("팝업", { 결과: await 팝업정리() });
     await 쉬기(600);
     const 전 = await 에디터상태();
