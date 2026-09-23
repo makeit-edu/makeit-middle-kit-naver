@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23a";
+export const 버전 = "2026-09-23b";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -174,6 +174,12 @@ export async function 실행(옵션 = {}) {
     const pw = tab.playwright;
     const ax = tab.ax;
     if (!ax || typeof ax.typeText !== "function" || typeof ax.click !== "function") { 적기("입력", { 실패: "이 브라우저 연결에는 ax 입력 API 가 없습니다" }); return 마무리(); }
+    // 코덱스 크롬 확장 26.915(2026-09-18) 부터 typeText·pressKey 가 (대상요소번호, 값) 두 인자가 됐다. null 이면 지금 커서가 있는 칸에 넣는다.
+    // 옛 판은 (값) 하나. 글자만 넘기면 새 판은 그 글자를 '요소 이름' 으로 읽어 "Could not prepare accessibility element 추석지원" 이 난다 (2026-09-23 실측).
+    const 새입력 = ax.typeText.length >= 2;
+    const 글넣기 = (글) => (새입력 ? ax.typeText(null, 글) : ax.typeText(글));
+    const 키넣기 = (키) => (새입력 ? ax.pressKey(null, 키) : ax.pressKey(키));
+    적기("입력방식", { 확장판: 새입력 ? "새 판 (요소번호, 값)" : "옛 판 (값)" });
     const F = pw.frameLocator(R.프레임);
     const 키이름 = (k) => (k === "Enter" ? "Return" : k);
 
@@ -226,11 +232,11 @@ export async function 실행(옵션 = {}) {
       for (const 어절 of String(문장).split(/(?<=\s)/)) {
         for (let i = 0; i < 어절.length; i += 4) 조각들.push(어절.slice(i, i + 4));
       }
-      for (const 조각 of 조각들) { await ax.typeText(조각); await 쉬기(랜덤(딜레이)); }
+      for (const 조각 of 조각들) { await 글넣기(조각); await 쉬기(랜덤(딜레이)); }
     };
     const 시간예산초 = 옵션.시간예산초 ?? R.시간예산초 ?? 180;
     const 시간초과 = () => (Date.now() - 시작) / 1000 > 시간예산초;
-    const 키 = async (이름) => { await ax.pressKey(키이름(이름)); };
+    const 키 = async (이름) => { await 키넣기(키이름(이름)); };
     const 에디터상태 = async () => {
       const body = F.locator("body").first();
       try {

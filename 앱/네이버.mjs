@@ -21,7 +21,7 @@ import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {처방 as 승인글처방} from "./승인글.mjs";
 
-export const 버전 = "2026-09-23a";
+export const 버전 = "2026-09-23b";
 
 const 여기 = dirname(fileURLToPath(import.meta.url));
 const 프로그램폴더 = join(여기, "네이버");
@@ -46,6 +46,8 @@ const 한국날짜 = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().
 
 // ───────── 처방 — 네이버 쪽 오류를 "수강생이 할 일" 로 ─────────
 const 네이버처방표 = [
+  {종류: "프로그램", 패턴: /Could not prepare accessibility element|is stale or missing|No input was sent/i,
+    원인: "코덱스 크롬 확장이 새 판으로 바뀌어 글자 입력이 안 됐어요", 할일: "프로그램 쪽 문제예요. 이 화면을 글자로 복사해 강의 문의 채널에 올려 주세요. 고쳐지면 따로 설치할 것 없이 다시 '네이버 글 써줘' 만 하면 돼요."},
   {종류: "내설정", 패턴: /크롬 플러그인을 못 찾|browser-client|클라이언트경로|Codex 홈 폴더/i,
     원인: "코덱스의 크롬 확장이 설치돼 있지 않아요", 할일: "코덱스 앱 → 설정 → 컴퓨터 사용(Chrome)에서 크롬 확장을 설치하고, 크롬 오른쪽 위 퍼즐 모양에서 확장을 켠 뒤 다시 '네이버 글 써줘' 라고 하세요."},
   {종류: "내설정", 패턴: /크롬 연결 없음|not connected|no browser|browser.*(unavailable|not found)|extension.*(not|disconnected)|Could not connect/i,
