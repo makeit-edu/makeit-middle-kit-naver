@@ -19,9 +19,9 @@ import {mkdir, readFile, readdir, writeFile} from "node:fs/promises";
 import {existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
-import {처방 as 승인글처방} from "./승인글.mjs";
+import {처방 as 승인글처방, 잠금으로} from "./승인글.mjs";
 
-export const 버전 = "2026-09-23c";
+export const 버전 = "2026-09-23d";
 
 const 여기 = dirname(fileURLToPath(import.meta.url));
 const 프로그램폴더 = join(여기, "네이버");
@@ -168,8 +168,11 @@ export async function 로그인확인({agent} = {}) {
 }
 
 // 키워드(또는 따라 쓸 네이버 글 주소)로 원고와 사진을 만든다. 2~3분.
-export async function 글만들기({작업폴더, 키워드 = "", 벤치마크URL = "", 사진수 = 3} = {}) {
-  if (!작업폴더) throw new Error("작업폴더 가 필요합니다");
+export async function 글만들기(옵션 = {}) {
+  if (!옵션.작업폴더) throw new Error("작업폴더 가 필요합니다");
+  return 잠금으로({작업폴더: 옵션.작업폴더, 이름: "네이버-글", 일: () => 글만들기본체(옵션)});
+}
+async function 글만들기본체({작업폴더, 키워드 = "", 벤치마크URL = "", 사진수 = 3} = {}) {
   const 설정 = await 설정읽기(작업폴더);
   if (!String(설정.openai키 || "").startsWith("sk-")) return {결과: "설정 필요", 빠진: ["OpenAI 키"]};
   if (!키워드 && !벤치마크URL) return {결과: "키워드 필요"};
@@ -195,8 +198,12 @@ export async function 글만들기({작업폴더, 키워드 = "", 벤치마크UR
 }
 
 // 네이버 편집기에 입력하고 임시저장. 한 번에 3분 안팎만 쓰고 "이어서" 를 돌려준다 (코덱스 한 번 실행 시간 한도 때문).
-export async function 쓰기({agent, 작업폴더, 원고, 시작블록 = 0} = {}) {
-  if (!작업폴더 || !원고) throw new Error("작업폴더·원고 가 필요합니다");
+// 두 번 겹쳐 돌면 한 편집기에 두 프로그램이 동시에 입력하므로 반드시 잠근다.
+export async function 쓰기(옵션 = {}) {
+  if (!옵션.작업폴더 || !옵션.원고) throw new Error("작업폴더·원고 가 필요합니다");
+  return 잠금으로({작업폴더: 옵션.작업폴더, 이름: "네이버-쓰기", 일: () => 쓰기본체(옵션)});
+}
+async function 쓰기본체({agent, 작업폴더, 원고, 시작블록 = 0} = {}) {
   if (!agent) return {결과: "멈춤", 할일: 처방또는프로그램("크롬 연결 없음")};
   const 타이핑 = await 불러("naver-typing.mjs");
   let r;
