@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23l";
+export const 버전 = "2026-09-23m";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -73,6 +73,30 @@ export function 점검() {
   };
 }
 
+// 사진 자리 고르기 — 글 모델이 사진을 글 끝에 몰아 넣을 때가 있다 (2026-09-23 실측: 사진 3장이 전부 맨 아래에 들어감).
+// 모델이 어디에 두든 사진 순서는 그대로 두고, 소제목 아래 첫 문단 뒤에 고르게 다시 놓는다.
+// 소제목이 사진보다 적으면 남는 사진은 다른 문단 뒤에 고르게 놓는다. (글만들기.mjs 와 naver-typing.mjs 에 같은 함수가 있다. 고치면 둘 다)
+export function 사진고르게(블록들) {
+  const 사진 = (블록들 || []).filter((b) => b && b.종류 === "사진");
+  if (!사진.length) return 블록들 || [];
+  const 나머지 = 블록들.filter((b) => b && b.종류 !== "사진");
+  const 고르게 = (후보, n) => (후보.length && n > 0 ? Array.from({ length: n }, (_, k) => 후보[Math.floor(((k + 0.5) * 후보.length) / n)]) : []);
+  // 자리 = 이 번호의 블록 '뒤'
+  const 소제목뒤 = [];
+  나머지.forEach((b, i) => { if (b.종류 === "소제목") 소제목뒤.push(나머지[i + 1] && 나머지[i + 1].종류 === "문단" ? i + 1 : i); });
+  let 자리 = 고르게(소제목뒤, Math.min(소제목뒤.length, 사진.length));
+  if (자리.length < 사진.length) {
+    const 문단뒤 = 나머지.map((b, i) => (b.종류 === "문단" && i > 0 && i < 나머지.length - 1 && !자리.includes(i) ? i : -1)).filter((i) => i >= 0);
+    자리 = 자리.concat(고르게(문단뒤, Math.min(문단뒤.length, 사진.length - 자리.length)));
+  }
+  자리 = [...new Set(자리)].sort((a, b) => a - b);
+  const 결과 = [];
+  let k = 0;
+  나머지.forEach((b, i) => { 결과.push(b); if (자리.includes(i) && k < 사진.length) 결과.push(사진[k++]); });
+  while (k < 사진.length) 결과.push(사진[k++]);
+  return 결과;
+}
+
 // ── 레시피 · 원고 읽기 ────────────────────────────────────────────
 async function 레시피읽기(원격주소) {
   // 원격과 로컬을 둘 다 읽어 '버전' 이 더 큰 쪽을 쓴다. (raw 캐시가 옛 판을 줄 때가 있다)
@@ -118,6 +142,7 @@ export async function 실행(옵션 = {}) {
     적기("레시피", { 출처, 버전: R.버전, 프로그램: 버전 });
     const 원고이름 = 옵션.원고 || "원고1.json";
     const 원고 = await 원고읽기(원고이름);
+    원고.블록 = 사진고르게(원고.블록); // 예전에 만든 원고도 사진이 끝에 몰려 있으면 고르게 (이어쓰기 번호도 매번 같게 나온다)
     const 원고폴더 = path.isAbsolute(원고이름) ? path.dirname(원고이름) : null;
     const 딜레이 = 옵션.딜레이 ?? R.타이핑딜레이 ?? 35;
     const 단계 = 옵션.단계 || "전부";
@@ -216,8 +241,24 @@ export async function 실행(옵션 = {}) {
     // 요소의 화면 좌표(프레임 오프셋 포함). 화면 밖이면 스크롤해서 다시 잰다.
     // 네이버 편집기는 위쪽 툴바(약 150px)가 고정이라, 그 아래 ~ 화면 하단 사이에 있어야 진짜 클릭이 닿는다.
     // 화면 밖이면 그 방향으로 스크롤하며 최대 6번 다시 잰다 (2026-09-17 실측: 두 번째 표에서 "outside the active tab content viewport").
-    const 좌표 = async (loc) => {
-      const 재기 = () => loc.evaluate((el) => { const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height }; });
+    const 가운데 = (el) => { const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height }; };
+    // 글 끝 자리 — 마지막 글자 바로 오른쪽. 가운데를 누르면 긴 줄은 글 한가운데에 커서가 선다.
+    // 맥 크롬은 End 키로 커서가 줄 끝에 가지 않는다. 그래서 가운데 클릭 → End → Enter 가 긴 소제목을 가운데서 쪼갰다 (2026-09-23 실측: 17자 소제목이 사라지고 다음 문단이 소제목 안으로 들어감).
+    const 글끝 = (el) => {
+      const b = el.getBoundingClientRect();
+      const 걷기 = el.ownerDocument.createTreeWalker(el, 4);
+      let 마지막 = null;
+      for (let n = 걷기.nextNode(); n; n = 걷기.nextNode()) if (n.textContent.replace(/[​﻿]/g, "").trim()) 마지막 = n;
+      if (!마지막) return { x: b.left + Math.min(20, b.width / 2), y: b.top + b.height / 2, w: b.width, h: b.height };
+      const 범위 = el.ownerDocument.createRange();
+      범위.selectNodeContents(마지막);
+      const 칸들 = 범위.getClientRects();
+      const e = 칸들[칸들.length - 1];
+      if (!e) return { x: b.right - 4, y: b.bottom - 8, w: b.width, h: b.height };
+      return { x: Math.min(b.right - 3, e.right + 12), y: e.top + e.height / 2, w: b.width, h: b.height };
+    };
+    const 좌표 = async (loc, 측정 = 가운데) => {
+      const 재기 = () => loc.evaluate(측정);
       let r = await 재기();
       let f = await 프레임위치();
       // 화면 아래쪽에는 "전체 글감 | 검색" 막대가 늘 떠 있다. 그 아래(가려진 곳)를 누르면 글감 검색칸이 눌려 글자가 그리로 들어간다 (2026-09-23 실측).
@@ -238,6 +279,15 @@ export async function 실행(옵션 = {}) {
       const p = await 좌표(loc);
       if (!(p.w > 0 && p.h > 0)) throw new Error("요소가 화면에 없음(크기 0)");
       await ax.click([p.x, p.y], 옵션.clickCount ? { clickCount: 옵션.clickCount } : undefined);
+      return p;
+    };
+    // 줄 끝에 커서를 둔다 (글을 이어 치거나 Enter 로 새 줄을 만들기 전에)
+    const 끝클릭 = async (loc) => {
+      const p = await 좌표(loc, 글끝);
+      if (!(p.w > 0 && p.h > 0)) throw new Error("요소가 화면에 없음(크기 0)");
+      await ax.click([p.x, p.y]);
+      await 쉬기(150);
+      await 키("End"); // 윈도우는 End 로도 한 번 더 확실히 (맥은 아무 일도 안 일어난다)
       return p;
     };
     // 여러 후보 셀렉터 중 화면에 있는 첫 번째
@@ -332,7 +382,7 @@ export async function 실행(옵션 = {}) {
       if ((await 글감상태()).열림) { await 키("Escape"); await 쉬기(400); }
       // 커서를 글 끝으로 되돌린다 (좌표클릭은 글감 막대 위쪽만 누른다)
       const 마지막 = F.locator(".se-component.se-text .se-text-paragraph, .se-component.se-sectionTitle .se-text-paragraph, .se-quotation .se-text-paragraph").last();
-      if ((await 마지막.count().catch(() => 0)) > 0) { try { await 좌표클릭(마지막); await 키("End"); } catch {} }
+      if ((await 마지막.count().catch(() => 0)) > 0) { try { await 끝클릭(마지막); } catch {} }
       await 쉬기(300);
       if ((await 글감상태()).열림) 적기("글감창", { 경고: `${이름}: 껐는데도 글감 창이 남아 있습니다` });
       return true;
@@ -344,7 +394,7 @@ export async function 실행(옵션 = {}) {
     const 아래로나가기 = async (부품) => {
       await 키("Escape"); await 쉬기(300);
       const 다음줄 = F.locator(`.se-component.${부품} + .se-component.se-text .se-text-paragraph`).last();
-      if ((await 다음줄.count().catch(() => 0)) > 0) { await 좌표클릭(다음줄); await 쉬기(250); await 키("End"); return "아래 빈 줄"; }
+      if ((await 다음줄.count().catch(() => 0)) > 0) { await 끝클릭(다음줄); await 쉬기(250); return "아래 빈 줄"; }
       return `본문 추가: ${await 본문추가하기()}`;
     };
     // 문단이 표·인용구 안으로 잘못 들어갔는지 확인 (들어갔으면 기록)
@@ -395,7 +445,7 @@ export async function 실행(옵션 = {}) {
       const 추가 = await 본문추가하기();
       if (추가 !== "누름") {
         const 마지막문단 = F.locator(R.본문문단).last();
-        if ((await 마지막문단.count()) > 0) { await 좌표클릭(마지막문단); await 키("End"); await 키("Enter"); }
+        if ((await 마지막문단.count()) > 0) { await 끝클릭(마지막문단); await 키("Enter"); }
       }
       await 쉬기(400);
     }
@@ -478,14 +528,27 @@ export async function 실행(옵션 = {}) {
             await 쉬기(200);
             방법 = "문단서식 → 소제목";
           }
-          const 소제목줄 = F.locator(".se-component.se-sectionTitle .se-text-paragraph", { hasText: 앞머리 }).last();
-          if ((await 소제목줄.count()) > 0) await 좌표클릭(소제목줄);
-          await 쉬기(300);
-          await 키("End");
-          await 키("Enter");
-          await 쉬기(400);
+          // 소제목 글 끝에 커서를 두고 Enter 로 새 줄을 만든다. 그 뒤 소제목이 통째로 남았는지 본다.
+          // 가운데서 Enter 가 들어가 둘로 쪼개졌으면 Backspace 로 다시 붙이고 끝에서 한 번 더 한다.
+          const 온글 = 블록.글.replace(/\s+/g, "");
+          const 온전 = () => F.locator("body").first().evaluate((el, 온글) => [...el.ownerDocument.querySelectorAll(".se-component.se-sectionTitle")]
+            .some((c) => (c.innerText || "").replace(/\s+/g, "").includes(온글)), 온글).catch(() => true);
+          const 소제목줄 = () => F.locator(".se-component.se-sectionTitle .se-text-paragraph", { hasText: 앞머리 }).last();
+          const 끝에서엔터 = async () => {
+            if ((await 소제목줄().count()) > 0) await 끝클릭(소제목줄());
+            await 쉬기(300);
+            await 키("Enter");
+            await 쉬기(500);
+          };
+          await 끝에서엔터();
+          let 고침 = "";
+          if (!(await 온전())) {
+            await 키("Backspace"); await 쉬기(500);
+            await 끝에서엔터();
+            고침 = (await 온전()) ? "쪼개진 소제목을 붙여 다시 줄바꿈" : "소제목이 쪼개졌는데 못 붙임";
+          }
           const 후 = await 에디터상태();
-          적기(이름, { 글: 블록.글, 방법, 소제목목록: 후.소제목, 컴포넌트: 후.컴포넌트 });
+          적기(이름, { 글: 블록.글, 방법, 소제목목록: 후.소제목, 컴포넌트: 후.컴포넌트, ...(고침 ? { [고침.includes("못") ? "경고" : "고침"]: 고침 } : {}) });
 
         } else if (블록.종류 === "인용구") {
           await 빈줄만들기();

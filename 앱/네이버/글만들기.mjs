@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23d";
+export const 버전 = "2026-09-23e";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 const 프로젝트 = path.resolve(여기, "..");
@@ -125,6 +125,7 @@ ${후킹규칙}
 - 사진은 총 ${사진수}장. 각 사진의 '프롬프트' 는 그 섹션의 메시지를 상징하는 장면을 영어로 1~2문장 묘사한다. 원문 문장을 그리지 않는다.
   사물·장소·상황·분위기만 쓴다. 간판·문서·서류·화면·책·표지판·현수막·포스터처럼 글자가 들어갈 만한 것은 넣지 않는다. 한국어 단어·제도 이름·숫자는 쓰지 않는다.
   사람을 그릴 때는 "seen from behind or in profile, face not visible" 를 넣는다. 화풍·글자 금지 규칙은 프로그램이 붙이므로 쓰지 않는다.
+- 사진 블록은 소제목 바로 아래 첫 문단 다음에 하나씩 둔다. 글 끝에 몰아 넣지 않는다.
 - 구분선은 마지막 문단 앞에 한 번.
 - 전체 문단 글자 수(띄어쓰기 빼고)는 1,800~2,600자. 1,800자보다 짧으면 실패다.`;
 
@@ -185,8 +186,33 @@ ${후킹규칙}
     }).sort((a, b) => b.위치 - a.위치);
     for (const x of 넣을곳) 원고.블록.splice(x.위치, 0, { 종류: "사진", 글: [], 칸: [], 프롬프트: x.프롬프트 });
   }
+  원고.블록 = 사진고르게(원고.블록 || []);
   Object.defineProperty(원고, "_사용량", { value: 쓴돈, enumerable: false });
   return 원고;
+}
+
+// 사진 자리 고르기 — 글 모델이 사진을 글 끝에 몰아 넣을 때가 있다 (2026-09-23 실측: 사진 3장이 전부 맨 아래에 들어감).
+// 모델이 어디에 두든 사진 순서는 그대로 두고, 소제목 아래 첫 문단 뒤에 고르게 다시 놓는다.
+// 소제목이 사진보다 적으면 남는 사진은 다른 문단 뒤에 고르게 놓는다. (글만들기.mjs 와 naver-typing.mjs 에 같은 함수가 있다. 고치면 둘 다)
+export function 사진고르게(블록들) {
+  const 사진 = (블록들 || []).filter((b) => b && b.종류 === "사진");
+  if (!사진.length) return 블록들 || [];
+  const 나머지 = 블록들.filter((b) => b && b.종류 !== "사진");
+  const 고르게 = (후보, n) => (후보.length && n > 0 ? Array.from({ length: n }, (_, k) => 후보[Math.floor(((k + 0.5) * 후보.length) / n)]) : []);
+  // 자리 = 이 번호의 블록 '뒤'
+  const 소제목뒤 = [];
+  나머지.forEach((b, i) => { if (b.종류 === "소제목") 소제목뒤.push(나머지[i + 1] && 나머지[i + 1].종류 === "문단" ? i + 1 : i); });
+  let 자리 = 고르게(소제목뒤, Math.min(소제목뒤.length, 사진.length));
+  if (자리.length < 사진.length) {
+    const 문단뒤 = 나머지.map((b, i) => (b.종류 === "문단" && i > 0 && i < 나머지.length - 1 && !자리.includes(i) ? i : -1)).filter((i) => i >= 0);
+    자리 = 자리.concat(고르게(문단뒤, Math.min(문단뒤.length, 사진.length - 자리.length)));
+  }
+  자리 = [...new Set(자리)].sort((a, b) => a - b);
+  const 결과 = [];
+  let k = 0;
+  나머지.forEach((b, i) => { 결과.push(b); if (자리.includes(i) && k < 사진.length) 결과.push(사진[k++]); });
+  while (k < 사진.length) 결과.push(사진[k++]);
+  return 결과;
 }
 
 // 최종 그림 프롬프트 — 어떤 언어의 글자도 나오지 않게 프로그램이 직접 만든다.
