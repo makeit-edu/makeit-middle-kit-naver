@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 이 파일을 고칠 때마다 올린다 (앱/배포.sh 가 커밋에 고정해 배포한다).
-export const 버전 = "2026-09-23d";
+export const 버전 = "2026-09-23e";
 
 const 여기 = path.dirname(fileURLToPath(import.meta.url));
 // 수강생 데이터 폴더(원고·사진). 앱 판에서는 실행() 이 옵션.데이터폴더 로 바꾼다. 프로그램 폴더(임시)와 다르다.
@@ -153,7 +153,9 @@ export async function 실행(옵션 = {}) {
       if (tab) 적기("탭잡기", { 방법: `이어쓰기 — 이 세션의 글쓰기 탭에서 블록${시작블록 + 1}부터` });
       else 적기("탭잡기", { 안내: "이 세션 탭 목록에 없어 열린 글쓰기 탭을 다시 잡습니다" });
     }
-    const 탭들 = tab ? [] : await chrome.user.openTabs();
+    // 이어쓰기가 아니면 수강생이 열어 둔 헌 글쓰기 탭은 잡지 않고 항상 새 탭을 연다.
+    // 2026-09-23 실측: 앞선 실패로 남은 글쓰기 탭을 잡았더니 편집기를 못 읽었다 (새 탭은 3초 만에 편집기가 잡힘).
+    const 탭들 = tab || !옵션.열린탭쓰기 ? [] : await chrome.user.openTabs();
     const 대상 = 탭들.find((t) => R.글쓰기주소패턴.some((p) => new RegExp(p).test(t.url || "")));
     if (대상) {
       try { tab = await chrome.user.claimTab(대상); 적기("탭잡기", { 방법: "열린 탭 잡음", 주소: (대상.url || "").slice(0, 80) }); }
@@ -297,7 +299,7 @@ export async function 실행(옵션 = {}) {
     if (!이어쓰기) 적기("팝업", { 결과: await 팝업정리() });
     await 쉬기(600);
     const 전 = await 에디터상태();
-    if (!전.에디터) { 적기("에디터", { 실패: "편집기 프레임을 못 찾았습니다. 화면이 다 떴는지 확인하세요", 상세: 전.오류 }); return 마무리(); }
+    if (!전.에디터) { 적기("에디터", { 실패: "편집기 프레임을 못 찾았습니다. 화면이 다 떴는지 확인하세요", 상세: 전.오류, 주소: String(await Promise.resolve(tab.url()).catch(() => "")).slice(0, 100) }); return 마무리(); }
     if (전.팝업) { 적기("에디터", { 실패: "'작성 중인 글' 팝업이 안 닫혔습니다" }); return 마무리(); }
     적기("시작상태", 전);
 
